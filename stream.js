@@ -236,13 +236,17 @@ function extractLinksFromPage(html) {
     var seen = {};
 
     var serverPatterns = ["pixel", "fsl", "hubcdn", "gdflix", "cloudrip"];
+    var allLinks = $("a");
 
-    $("a").each(function () {
-        var href = $(this).attr("href") || "";
-        var text = $(this).text().trim();
+    console.log("Total links on page:", allLinks.length);
 
-        if (!href || href.indexOf("http") !== 0 || seen[href]) return;
-        if (href.indexOf("t.me") !== -1 || href.indexOf("telegram") !== -1) return;
+    for (var idx = 0; idx < allLinks.length; idx++) {
+        var el = allLinks.eq(idx);
+        var href = el.attr("href") || "";
+        var text = el.text().trim();
+
+        if (!href || href.indexOf("http") !== 0 || seen[href]) continue;
+        if (href.indexOf("t.me") !== -1 || href.indexOf("telegram") !== -1) continue;
 
         var isValid = false;
         var server = "";
@@ -255,7 +259,7 @@ function extractLinksFromPage(html) {
             }
         }
 
-        var classes = $(this).attr("class") || "";
+        var classes = el.attr("class") || "";
         if (classes.indexOf("btn-success") !== -1 || classes.indexOf("btn-primary") !== -1) {
             isValid = true;
         }
@@ -279,7 +283,7 @@ function extractLinksFromPage(html) {
                 quality: ""
             });
         }
-    });
+    }
 
     console.log("Extracted", streams.length, "streams");
     return streams;
