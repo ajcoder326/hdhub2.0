@@ -1,6 +1,6 @@
 // HDHub4u 2.0 Posts Module - Direct HTTP
 
-var BASE_URL = "https://hdhub4u.foo";
+var BASE_URL = "https://new1.hdhub4u.fo";
 
 var headers = {
     "Cookie": "xla=s4t",
