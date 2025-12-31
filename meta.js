@@ -1,9 +1,9 @@
-// HDHub4u 2.0 Meta Module - Direct HTTP
+// HDHub4u 2.0 Meta Module - Simplified for Rhino compatibility
 
 var headers = {
     "Cookie": "xla=s4t",
     "Referer": "https://google.com",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 };
 
 function getMetaData(link, providerContext) {
@@ -28,10 +28,10 @@ function getMetaData(link, providerContext) {
             title = $("h1.page-title").text() || $("h1").first().text() || "";
         }
         title = title.trim();
-        // Remove leading icon if present
         if (title.length > 0 && title.charCodeAt(0) > 10000) {
             title = title.substring(1).trim();
         }
+        console.log("Title:", title.substring(0, 40));
 
         // Determine type
         var type = "movie";
@@ -42,112 +42,104 @@ function getMetaData(link, providerContext) {
         // Extract poster
         var image = $("main.page-body img.aligncenter").first().attr("src") ||
             $("img.aligncenter").first().attr("src") || "";
+        console.log("Image:", image ? "found" : "none");
 
         // Extract synopsis
-        var synopsis = "";
+        var synopsis = "Watch " + (title || "content") + " in high quality.";
         var bodyText = container.text() || "";
-        var markers = ["Storyline", "SYNOPSIS", "STORY", "DESCRIPTION", "Plot"];
-        for (var m = 0; m < markers.length; m++) {
-            var markerIdx = bodyText.indexOf(markers[m]);
-            if (markerIdx !== -1) {
-                var afterMarker = bodyText.substring(markerIdx);
-                var colonIdx = afterMarker.indexOf(":");
-                if (colonIdx !== -1 && colonIdx < 30) {
-                    synopsis = afterMarker.substring(colonIdx + 1, colonIdx + 500).trim();
-                    var cutIdx = synopsis.indexOf("Download");
-                    if (cutIdx > 30) synopsis = synopsis.substring(0, cutIdx).trim();
-                    break;
-                }
+        var storyIdx = bodyText.indexOf("Storyline");
+        if (storyIdx === -1) storyIdx = bodyText.indexOf("Synopsis");
+        if (storyIdx !== -1) {
+            var colonIdx = bodyText.indexOf(":", storyIdx);
+            if (colonIdx !== -1 && colonIdx < storyIdx + 30) {
+                var synopText = bodyText.substring(colonIdx + 1, colonIdx + 400).trim();
+                var cutIdx = synopText.indexOf("Download");
+                if (cutIdx > 30) synopText = synopText.substring(0, cutIdx).trim();
+                if (synopText.length > 20) synopsis = synopText;
             }
-        }
-        if (!synopsis || synopsis.length < 20) {
-            synopsis = "Watch " + (title || "content") + " in high quality.";
         }
 
         // Extract IMDB ID
         var imdbId = "";
         var imdbLink = container.find('a[href*="imdb.com/title/tt"]').attr("href");
         if (imdbLink) {
-            var imdbParts = imdbLink.split("/");
-            for (var i = 0; i < imdbParts.length; i++) {
-                if (imdbParts[i].indexOf("tt") === 0) {
-                    imdbId = imdbParts[i];
-                    break;
-                }
+            var ttIdx = imdbLink.indexOf("tt");
+            if (ttIdx !== -1) {
+                imdbId = imdbLink.substring(ttIdx, ttIdx + 9);
             }
         }
 
-        // Extract links (episodes or quality options)
+        // ============================================
+        // EXTRACT LINKS (using domain patterns like v1)
+        // ============================================
         var linkList = [];
-        var directLinks = [];
 
-        // Method 1: Find episode links with "EPiSODE" text
-        var episodeStrongs = $('strong:contains("EPiSODE")');
-        for (var e = 0; e < episodeStrongs.length && e < 50; e++) {
-            var epElement = episodeStrongs.eq(e);
-            var epTitle = epElement.parent().parent().text().trim();
+        // Find ALL links to streaming/download providers
+        var allLinks = container.find("a");
+        var episodeLinks = [];
+        var qualityLinks = [];
+        var otherLinks = [];
+        var seenUrls = {};
 
-            var episodeLink = epElement.parent().parent().parent().next().next().find("a").attr("href") ||
-                epElement.parent().parent().parent().next().find("a").attr("href") || "";
+        for (var i = 0; i < allLinks.length; i++) {
+            var anchor = allLinks.eq(i);
+            var href = anchor.attr("href") || "";
+            var text = anchor.text().trim();
 
-            if (episodeLink && episodeLink.indexOf("http") === 0) {
-                directLinks.push({
-                    title: epTitle || ("Episode " + (e + 1)),
-                    link: episodeLink
-                });
+            // Skip non-http and duplicates
+            if (href.indexOf("http") !== 0 || seenUrls[href]) continue;
+
+            // Only include links to provider domains
+            var isProvider = href.indexOf("gadgetsweb") !== -1 ||
+                href.indexOf("hubstream") !== -1 ||
+                href.indexOf("hubdrive") !== -1 ||
+                href.indexOf("hubcloud") !== -1 ||
+                href.indexOf("hubcdn") !== -1;
+
+            if (!isProvider) continue;
+
+            seenUrls[href] = true;
+            var textUpper = text.toUpperCase();
+
+            // Categorize by text content
+            if (textUpper.indexOf("EPISODE") !== -1 || textUpper.indexOf("EPISOD") !== -1) {
+                episodeLinks.push({ title: text, link: href });
+            }
+            else if (text.indexOf("480") !== -1 || text.indexOf("720") !== -1 ||
+                text.indexOf("1080") !== -1 || text.indexOf("2160") !== -1 ||
+                text.indexOf("4K") !== -1) {
+                qualityLinks.push({ title: text, link: href });
+            }
+            else {
+                otherLinks.push({ title: text || "Download", link: href });
             }
         }
 
-        // Method 2: Find episode anchor links
-        if (directLinks.length === 0) {
-            var episodeAnchors = container.find('a:contains("EPiSODE")');
-            for (var ea = 0; ea < episodeAnchors.length && ea < 50; ea++) {
-                var epAnchor = episodeAnchors.eq(ea);
-                var epText = epAnchor.text().trim();
-                var epHref = epAnchor.attr("href");
-                if (epHref && epHref.indexOf("http") === 0) {
-                    directLinks.push({
-                        title: epText.toUpperCase(),
-                        link: epHref
-                    });
-                }
-            }
-        }
+        console.log("Links found - Episodes:", episodeLinks.length, "Quality:", qualityLinks.length, "Other:", otherLinks.length);
 
-        // Add episode links as a group
-        if (directLinks.length > 0) {
+        // Build linkList structure
+        if (episodeLinks.length > 0) {
             linkList.push({
-                title: title || "Episodes",
-                directLinks: directLinks
+                title: "Episodes",
+                directLinks: episodeLinks
             });
         }
 
-        // Method 3: Find quality links (for movies)
-        if (directLinks.length === 0) {
-            var qualityAnchors = container.find('a:contains("480"), a:contains("720"), a:contains("1080"), a:contains("2160"), a:contains("4K")');
-            for (var q = 0; q < qualityAnchors.length && q < 20; q++) {
-                var qAnchor = qualityAnchors.eq(q);
-                var qText = qAnchor.text().trim();
-                var qHref = qAnchor.attr("href");
-
-                var quality = "";
-                var qMatch = qText.match(/\b(480p|720p|1080p|2160p|4K)\b/i);
-                if (qMatch) quality = qMatch[0];
-
-                if (qHref && qHref.indexOf("http") === 0) {
-                    linkList.push({
-                        title: qText,
-                        quality: quality,
-                        directLinks: [{
-                            title: "Download",
-                            link: qHref
-                        }]
-                    });
-                }
-            }
+        if (qualityLinks.length > 0) {
+            linkList.push({
+                title: "Quality Options",
+                directLinks: qualityLinks
+            });
         }
 
-        console.log("Meta extracted - Title:", title.substring(0, 30), "Links:", linkList.length);
+        if (otherLinks.length > 0) {
+            linkList.push({
+                title: "Download Links",
+                directLinks: otherLinks
+            });
+        }
+
+        console.log("LinkList total:", linkList.length);
 
         return {
             title: title || "Unknown Title",
