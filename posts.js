@@ -61,7 +61,13 @@ function getSearchPosts(query, page, providerContext) {
     console.log("HDHub4u 2.0 getSearchPosts - query:", query);
 
     try {
-        var url = BASE_URL + "/page/" + page + "/?s=" + encodeURIComponent(query);
+        // Use /search/query/ format (not /?s= which requires JS)
+        var url = BASE_URL + "/search/" + encodeURIComponent(query) + "/";
+        if (page > 1) {
+            url = BASE_URL + "/search/" + encodeURIComponent(query) + "/page/" + page + "/";
+        }
+        console.log("Search URL:", url);
+
         var response = axios.get(url, { headers: headers });
 
         if (!response || !response.data) {
@@ -71,20 +77,20 @@ function getSearchPosts(query, page, providerContext) {
         var $ = cheerio.load(response.data);
         var posts = [];
 
-        // Try movie-grid first, then fallback to recent-movies
-        var items = $("ul.movie-grid li.movie-card");
-        if (items.length === 0) {
-            items = $("ul.recent-movies li.thumb");
-        }
+        // Search results use ul.recent-movies li.thumb
+        var items = $("ul.recent-movies li.thumb");
+        console.log("Search items found:", items.length);
 
         for (var i = 0; i < items.length; i++) {
             try {
                 var element = items.eq(i);
-                var img = element.find("img").first();
+                var img = element.find("figure img").first();
+                if (img.length === 0) {
+                    img = element.find("img").first();
+                }
                 var link = element.find("a").first();
-                var titleEl = element.find("h3");
 
-                var title = titleEl.text() || img.attr("alt") || "";
+                var title = img.attr("alt") || "";
                 var href = link.attr("href") || "";
                 var image = img.attr("src") || "";
 
@@ -100,6 +106,7 @@ function getSearchPosts(query, page, providerContext) {
             }
         }
 
+        console.log("Search returned", posts.length, "results");
         return posts;
     } catch (err) {
         console.error("getSearchPosts error:", err);
