@@ -1,15 +1,13 @@
 {
-    "id": "hdhub4u-2.0",
     "name": "HDHub4u 2.0",
     "version": "2.0.0",
-    "description": "HDHub4u provider with Direct HTTP extraction (faster, no WebView)",
     "author": "StreamBox",
+    "description": "HDHub4u with Direct HTTP extraction - faster, no WebView",
     "icon": "https://hdhub4u.foo/wp-content/uploads/2023/05/HDHub4u-Logo.png",
-    "baseUrl": "https://hdhub4u.foo",
-    "modules": [
-        "catalog",
-        "posts",
-        "meta",
-        "stream"
-    ]
+    "modules": {
+        "catalog": "catalog.js",
+        "posts": "posts.js",
+        "meta": "meta.js",
+        "stream": "stream.js"
+    }
 }
