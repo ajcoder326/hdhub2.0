@@ -65,9 +65,11 @@ function extractFromGadgetsweb(link) {
             }
         }
 
-        // Method 2: Look for old pattern s('o','...',180)
-        var sPatternMatch = html.match(/s\(['"]o['"],\s*['"]([^'"]+)['"]\s*,\s*\d+\)/);
-        if (sPatternMatch && sPatternMatch[1]) {
+        // Method 2: Look for s('o','...',N) or s('o','...',N*M) pattern
+        // The number can be 180 or 180*1000 etc
+        var sPatternMatch = html.match(/s\(['"]o['"],\s*['"]([A-Za-z0-9+\/=]+)['"]\s*,/);
+        if (sPatternMatch && sPatternMatch[1] && sPatternMatch[1].length > 50) {
+            console.log("Found s() pattern, length:", sPatternMatch[1].length);
             var decoded = decodeObfuscatedString(sPatternMatch[1]);
             if (decoded && decoded.o) {
                 var nextUrl = atob(decoded.o);
