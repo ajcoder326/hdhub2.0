@@ -1,5 +1,9 @@
-// HDHub4u 2.0 Stream Module - Direct HTTP Extraction (Vega-style)
-// NO WebView automation - pure HTTP requests + decoding
+// HDHub4u 2.0 Stream Module - Direct HTTP Extraction (Updated)
+// Handles: gadgetsweb.xyz, hubdrive.space, hubcloud, hubstream.art
+//
+// NEW DISCOVERY: gadgetsweb now stores encoded data in localStorage
+// Decoding: base64 → base64 → ROT13 → base64 → JSON
+// Result: {w: waitTime, l: currentUrl, o: base64NextUrl}
 
 var headers = {
     "Cookie": "xla=s4t",
@@ -14,18 +18,22 @@ function getStreams(link, type) {
     console.log("HDHub4u 2.0 getStreams:", link);
 
     try {
-        // Determine link type and extract accordingly
-        if (link.indexOf("hubdrive") !== -1) {
+        // Determine link type and route to appropriate handler
+        if (link.indexOf("hubdrive.space") !== -1 || link.indexOf("hubdrive.") !== -1) {
             return extractFromHubdrive(link);
         }
         else if (link.indexOf("hubcloud") !== -1) {
             return extractFromHubcloud(link);
         }
+        else if (link.indexOf("hubstream") !== -1) {
+            return extractFromHubstream(link);
+        }
         else if (link.indexOf("gadgetsweb") !== -1 || link.indexOf("gadgets.") !== -1) {
             return extractFromGadgetsweb(link);
         }
         else {
-            // Unknown link type - try as gadgetsweb (most common for HDHub4U)
+            // Unknown - try as gadgetsweb
+            console.log("Unknown link type, trying gadgetsweb flow:", link);
             return extractFromGadgetsweb(link);
         }
     } catch (err) {
@@ -35,8 +43,8 @@ function getStreams(link, type) {
 }
 
 /**
- * Extract from gadgetsweb.xyz shortener (most common for TV series)
- * This decodes the obfuscated redirect URL instead of waiting for timer
+ * Extract from gadgetsweb.xyz
+ * NEW METHOD: The encoded URL is embedded in page HTML, not in s() function
  */
 function extractFromGadgetsweb(link) {
     console.log("Extracting from gadgetsweb:", link);
@@ -45,20 +53,147 @@ function extractFromGadgetsweb(link) {
         var response = axios.get(link, { headers: headers });
         var html = response.data;
 
-        // Look for the encoded string in the page
-        // Format: s('o','BASE64_STRING',180)
-        var encodedMatch = html.match(/s\('o','([^']+)',\s*\d+\)/);
-        if (encodedMatch && encodedMatch[1]) {
-            var decoded = decodeObfuscatedString(encodedMatch[1]);
+        // Method 1: Look for inline encoded data in script
+        // Format: var _0x... = atob("BASE64")
+        var inlineBase64 = extractInlineEncodedData(html);
+        if (inlineBase64) {
+            var decoded = tryDecodeGadgetsweb(inlineBase64);
             if (decoded && decoded.o) {
-                var redirectUrl = atob(decoded.o);
-                console.log("Decoded redirect URL:", redirectUrl.substring(0, 50));
-                return extractFromRedirectPage(redirectUrl);
+                var nextUrl = atob(decoded.o);
+                console.log("Decoded next URL:", nextUrl.substring(0, 50));
+                return followNextUrl(nextUrl);
             }
         }
 
-        // Fallback: Try to find direct hubdrive/hubcloud links
+        // Method 2: Look for old pattern s('o','...',180)
+        var sPatternMatch = html.match(/s\(['"]o['"],\s*['"]([^'"]+)['"]\s*,\s*\d+\)/);
+        if (sPatternMatch && sPatternMatch[1]) {
+            var decoded = decodeObfuscatedString(sPatternMatch[1]);
+            if (decoded && decoded.o) {
+                var nextUrl = atob(decoded.o);
+                console.log("Decoded via s() pattern:", nextUrl.substring(0, 50));
+                return followNextUrl(nextUrl);
+            }
+        }
+
+        // Method 3: Look for direct hub links in page (fallback)
         var $ = cheerio.load(html);
+        var hubLink = $('a[href*="hubdrive"]').first().attr("href") ||
+            $('a[href*="hubcloud"]').first().attr("href") ||
+            $('a[href*="hblinks"]').first().attr("href");
+
+        if (hubLink) {
+            console.log("Found direct hub link:", hubLink);
+            return followNextUrl(hubLink);
+        }
+
+        // Method 4: Return the link itself with intermediate flag
+        console.log("Could not decode, returning as intermediate link");
+        return [{
+            server: "Manual Link",
+            link: link,
+            type: "direct",
+            quality: ""
+        }];
+
+    } catch (err) {
+        console.error("extractFromGadgetsweb error:", err);
+        return [];
+    }
+}
+
+/**
+ * Extract inline encoded data from gadgetsweb HTML
+ * Looks for patterns like: atob("BASE64STRING")
+ */
+function extractInlineEncodedData(html) {
+    // Look for JSON-like structures with encoded values
+    var patterns = [
+        /\{"value"\s*:\s*"([A-Za-z0-9+\/=]+)"/,  // localStorage format
+        /atob\s*\(\s*["']([A-Za-z0-9+\/=]+)["']\s*\)/,  // atob() calls
+        /data\s*=\s*["']([A-Za-z0-9+\/=]{50,})["']/,  // data = "..." assignments
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+        var match = html.match(patterns[i]);
+        if (match && match[1] && match[1].length > 50) {
+            console.log("Found encoded data with pattern", i);
+            return match[1];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Try to decode gadgetsweb encoded string
+ * Sequence: base64 → base64 → ROT13 → base64 → JSON
+ */
+function tryDecodeGadgetsweb(encoded) {
+    try {
+        var step1 = atob(encoded);      // First base64
+        var step2 = atob(step1);        // Second base64
+        var step3 = rot13(step2);       // ROT13
+        var step4 = atob(step3);        // Third base64
+        return JSON.parse(step4);        // Parse JSON
+    } catch (e) {
+        console.error("tryDecodeGadgetsweb failed:", e);
+        // Try alternative: might just be double base64
+        try {
+            var alt1 = atob(encoded);
+            var alt2 = atob(alt1);
+            return JSON.parse(alt2);
+        } catch (e2) {
+            return null;
+        }
+    }
+}
+
+/**
+ * Follow the next URL based on domain
+ */
+function followNextUrl(url) {
+    if (url.indexOf("hblinks") !== -1) {
+        return extractFromHblinks(url);
+    }
+    else if (url.indexOf("hubdrive") !== -1) {
+        return extractFromHubdrive(url);
+    }
+    else if (url.indexOf("hubcloud") !== -1) {
+        return extractFromHubcloud(url);
+    }
+    else {
+        // Try as generic - fetch and look for hub links
+        try {
+            var response = axios.get(url, { headers: headers });
+            var $ = cheerio.load(response.data);
+            var hubLink = $('a[href*="hubdrive"]').first().attr("href") ||
+                $('a[href*="hubcloud"]').first().attr("href");
+            if (hubLink) {
+                return followNextUrl(hubLink);
+            }
+        } catch (e) {
+            console.error("followNextUrl error:", e);
+        }
+
+        return [{
+            server: "Link",
+            link: url,
+            type: "direct"
+        }];
+    }
+}
+
+/**
+ * Extract from hblinks.dad
+ */
+function extractFromHblinks(link) {
+    console.log("Extracting from hblinks:", link);
+
+    try {
+        var response = axios.get(link, { headers: headers });
+        var $ = cheerio.load(response.data);
+
         var hubLink = $('a[href*="hubdrive"]').first().attr("href") ||
             $('a[href*="hubcloud"]').first().attr("href");
 
@@ -70,106 +205,15 @@ function extractFromGadgetsweb(link) {
             }
         }
 
-        console.log("Could not find encoded string or hub links");
-        return [];
+        return [{
+            server: "HBLinks",
+            link: link,
+            type: "direct"
+        }];
 
     } catch (err) {
-        console.error("extractFromGadgetsweb error:", err);
+        console.error("extractFromHblinks error:", err);
         return [];
-    }
-}
-
-/**
- * Extract from redirect page (after gadgetsweb decoding)
- */
-function extractFromRedirectPage(link) {
-    console.log("Extracting from redirect page:", link);
-
-    try {
-        var response = axios.get(link, { headers: headers });
-        var html = response.data;
-
-        // Decode the wp_http tokens
-        var tokenData = extractTokenData(html);
-        if (!tokenData) {
-            console.log("No token data found, trying direct extraction");
-            return extractLinksFromPage(html);
-        }
-
-        // Build the redirect URL with token
-        var token = btoa(tokenData.data);
-        var blogLink = tokenData.wp_http1 + "?re=" + token;
-
-        console.log("Waiting for redirect, total_time:", tokenData.total_time);
-
-        // In Direct HTTP, we can't really "wait" in sync JS
-        // But we can try the link immediately - sometimes it works
-        // If not, we'll return the intermediate link for manual handling
-
-        try {
-            var redirectResponse = axios.get(blogLink, { headers: headers });
-            var redirectHtml = redirectResponse.data;
-
-            // Check for "Invalid Request" - means timer not elapsed
-            if (redirectHtml.indexOf("Invalid Request") !== -1) {
-                console.log("Timer not elapsed, returning intermediate link");
-                // Return as a manual link the user can open
-                return [{
-                    server: "Manual (wait " + tokenData.total_time + "s)",
-                    link: blogLink,
-                    type: "direct",
-                    quality: ""
-                }];
-            }
-
-            // Extract vcloud link
-            var vcloudMatch = redirectHtml.match(/var reurl = "([^"]+)"/);
-            if (vcloudMatch && vcloudMatch[1]) {
-                return extractFromHubcloud(vcloudMatch[1]);
-            }
-
-            return extractLinksFromPage(redirectHtml);
-
-        } catch (e) {
-            console.log("Redirect request failed, returning blog link");
-            return [{
-                server: "HubCloud",
-                link: blogLink,
-                type: "direct"
-            }];
-        }
-
-    } catch (err) {
-        console.error("extractFromRedirectPage error:", err);
-        return [];
-    }
-}
-
-/**
- * Extract token data from redirect page
- */
-function extractTokenData(html) {
-    try {
-        // Look for ck('_wp_http_N','value')
-        var regex = /ck\('_wp_http_\d+','([^']+)'/g;
-        var combinedString = "";
-        var match;
-
-        while ((match = regex.exec(html)) !== null) {
-            combinedString += match[1];
-        }
-
-        if (!combinedString) {
-            return null;
-        }
-
-        // Decode: base64 -> base64 -> ROT13 -> base64
-        var decoded = atob(atob(rot13(atob(combinedString))));
-        return JSON.parse(decoded);
-
-    } catch (e) {
-        console.error("extractTokenData error:", e);
-        return null;
     }
 }
 
@@ -186,10 +230,15 @@ function extractFromHubdrive(link) {
         // Find the HubCloud button
         var hubcloudLink = $(".btn.btn-primary.btn-user.btn-success1.m-1").first().attr("href") ||
             $('a[href*="hubcloud"]').first().attr("href") ||
-            link;
+            $('a.btn-success[href*="cloud"]').first().attr("href");
 
-        console.log("Found hubcloud link:", hubcloudLink.substring(0, 50));
-        return extractFromHubcloud(hubcloudLink);
+        if (hubcloudLink) {
+            console.log("Found hubcloud link:", hubcloudLink.substring(0, 50));
+            return extractFromHubcloud(hubcloudLink);
+        }
+
+        // Fallback: extract any download links from this page
+        return extractLinksFromPage(response.data);
 
     } catch (err) {
         console.error("extractFromHubdrive error:", err);
@@ -208,17 +257,77 @@ function extractFromHubcloud(link) {
         var html = response.data;
 
         // Check for META refresh redirect
-        var metaMatch = html.match(/<META HTTP-EQUIV="refresh" content="0; url=([^"]+)"/i);
+        var metaMatch = html.match(/<META HTTP-EQUIV=["']refresh["'][^>]*url=([^"'>]+)/i);
         if (metaMatch && metaMatch[1]) {
             console.log("Following META redirect");
             var redirectResponse = axios.get(metaMatch[1], { headers: headers });
             html = redirectResponse.data;
         }
 
+        // Look for download button
+        var $ = cheerio.load(html);
+        var downloadLink = $("#download").attr("href") ||
+            $('a#download').attr("href") ||
+            $('a[href*="gamerxyt"]').first().attr("href");
+
+        if (downloadLink) {
+            console.log("Found download link:", downloadLink.substring(0, 50));
+            var finalResponse = axios.get(downloadLink, { headers: headers });
+            return extractLinksFromPage(finalResponse.data);
+        }
+
+        // Fallback: extract from current page
         return extractLinksFromPage(html);
 
     } catch (err) {
         console.error("extractFromHubcloud error:", err);
+        return [];
+    }
+}
+
+/**
+ * Extract from HubStream (streaming)
+ */
+function extractFromHubstream(link) {
+    console.log("Extracting from hubstream:", link);
+
+    try {
+        var response = axios.get(link, { headers: headers });
+        var html = response.data;
+
+        // Look for video source
+        var sourceMatch = html.match(/source[^>]*src=["']([^"']+\.m3u8[^"']*)/i) ||
+            html.match(/file["']?\s*:\s*["']([^"']+\.m3u8[^"']*)/i);
+
+        if (sourceMatch && sourceMatch[1]) {
+            return [{
+                server: "HubStream",
+                link: sourceMatch[1],
+                type: "m3u8",
+                quality: ""
+            }];
+        }
+
+        // Look for iframe
+        var $ = cheerio.load(html);
+        var iframe = $("iframe").first().attr("src");
+        if (iframe) {
+            return [{
+                server: "HubStream",
+                link: iframe,
+                type: "iframe",
+                quality: ""
+            }];
+        }
+
+        return [{
+            server: "HubStream",
+            link: link,
+            type: "direct"
+        }];
+
+    } catch (err) {
+        console.error("extractFromHubstream error:", err);
         return [];
     }
 }
@@ -231,11 +340,9 @@ function extractLinksFromPage(html) {
     var streams = [];
     var seen = {};
 
-    // Server patterns to look for
-    var serverPatterns = ["pixel", "fsl", "hubcdn", "fukggl", "firecdn", "gdflix", "cdn."];
-    var excludePatterns = ["t.me", "telegram", "facebook", "twitter", "instagram"];
+    var serverPatterns = ["pixel", "fsl", "hubcdn", "fukggl", "firecdn", "gdflix", "cdn.", "cloudrip"];
+    var excludePatterns = ["t.me", "telegram", "facebook", "twitter", "instagram", "javascript:"];
 
-    // Find all button-style links
     var selectors = [
         "a.btn-success",
         "a.btn-primary",
@@ -246,7 +353,8 @@ function extractLinksFromPage(html) {
         "a[href*='pixel']",
         "a[href*='fsl']",
         "a[href*='hubcdn']",
-        "a[href*='gdflix']"
+        "a[href*='gdflix']",
+        "a[href*='cloudrip']"
     ];
 
     for (var s = 0; s < selectors.length; s++) {
@@ -273,7 +381,7 @@ function extractLinksFromPage(html) {
             var server = serverMatch ? serverMatch[1] : "";
 
             // Check if it matches a server pattern
-            var isValidServer = serverPatterns.length === 0;
+            var isValidServer = false;
             for (var p = 0; p < serverPatterns.length; p++) {
                 if (href.toLowerCase().indexOf(serverPatterns[p]) !== -1) {
                     isValidServer = true;
@@ -283,15 +391,14 @@ function extractLinksFromPage(html) {
             }
 
             // Also accept button-styled links
-            if (el.attr("class") && (el.attr("class").indexOf("btn-success") !== -1 ||
-                el.attr("class").indexOf("btn-primary") !== -1)) {
+            var classes = el.attr("class") || "";
+            if (classes.indexOf("btn-success") !== -1 || classes.indexOf("btn-primary") !== -1) {
                 isValidServer = true;
             }
 
             if (isValidServer || server) {
                 seen[href] = true;
 
-                // Determine type from URL
                 var streamType = "direct";
                 if (href.indexOf(".m3u8") !== -1) streamType = "m3u8";
                 else if (href.indexOf(".mp4") !== -1) streamType = "mp4";
@@ -319,21 +426,19 @@ function extractQuality(text) {
     return match ? match[1] : "";
 }
 
-// ============ Decoding Functions (from Vega) ============
+// ============ Decoding Functions ============
 
 /**
- * Decode obfuscated string from gadgetsweb
- * Format: base64 -> base64 -> ROT13 -> base64 -> JSON
+ * Decode obfuscated string (legacy pattern)
  */
 function decodeObfuscatedString(encoded) {
     try {
-        var decoded = atob(encoded);      // First base64
-        decoded = atob(decoded);           // Second base64
-        decoded = rot13(decoded);          // ROT13
-        decoded = atob(decoded);           // Third base64
-        return JSON.parse(decoded);        // Parse JSON
+        var decoded = atob(encoded);
+        decoded = atob(decoded);
+        decoded = rot13(decoded);
+        decoded = atob(decoded);
+        return JSON.parse(decoded);
     } catch (e) {
-        console.error("decodeObfuscatedString error:", e);
         return null;
     }
 }
