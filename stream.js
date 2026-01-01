@@ -108,102 +108,44 @@ function decodeGadgetsweb(encoded) {
 }
 
 /**
- * Extract from HubStream - get m3u8 video URL
- * HubStream embeds the m3u8 in a <source> tag
+ * Extract from HubStream - requires WebView automation
+ * HubStream page is JavaScript-rendered, m3u8 not available via HTTP
+ * Uses WebView to wait for page load and extract video source
  */
 function extractFromHubstream(link) {
-    console.log("Extracting from hubstream:", link);
+    console.log("HubStream requires WebView automation:", link);
 
-    try {
-        // Need to use hubstream referer for the video to load
-        var hubstreamHeaders = {
-            "Referer": "https://hubstream.art/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        };
-
-        var response = axios.get(link, { headers: hubstreamHeaders });
-        var html = response.data;
-
-        // Method 1: Look for m3u8 URL in page source
-        var m3u8Idx = html.indexOf(".m3u8");
-        if (m3u8Idx !== -1) {
-            // Find the start of the URL (look for http before .m3u8)
-            var searchStart = Math.max(0, m3u8Idx - 200);
-            var segment = html.substring(searchStart, m3u8Idx + 100);
-
-            // Find http:// or https://
-            var httpIdx = segment.lastIndexOf("https://");
-            if (httpIdx === -1) {
-                httpIdx = segment.lastIndexOf("http://");
-            }
-
-            if (httpIdx !== -1) {
-                var urlStart = httpIdx;
-                var urlRest = segment.substring(httpIdx);
-
-                // Find end of URL (quote, space, or angle bracket)
-                var endIdx = -1;
-                for (var i = 0; i < urlRest.length; i++) {
-                    var ch = urlRest.charAt(i);
-                    if (ch === '"' || ch === "'" || ch === " " || ch === "<" || ch === ">") {
-                        endIdx = i;
-                        break;
-                    }
+    // Return automation rules for hidden browser
+    return [{
+        server: "HubStream",
+        link: link,
+        type: "automate",
+        quality: "HD",
+        automation: JSON.stringify({
+            steps: [
+                // Step 1: Wait for video element to appear
+                {
+                    action: "wait",
+                    selector: "video, source, media-player",
+                    timeout: 10000
+                },
+                // Step 2: Extract m3u8 URL from video source
+                {
+                    action: "extractVideoUrl",
+                    selectors: [
+                        "source[src*='.m3u8']",
+                        "video source",
+                        "video[src]",
+                        "media-player source"
+                    ],
+                    patterns: [".m3u8", "master.m3u8"]
                 }
-
-                if (endIdx > 0) {
-                    var m3u8Url = urlRest.substring(0, endIdx);
-                    console.log("Found m3u8 URL:", m3u8Url.substring(0, 60));
-
-                    return [{
-                        server: "HubStream",
-                        link: m3u8Url,
-                        type: "m3u8",
-                        quality: "HD",
-                        headers: {
-                            "Referer": "https://hubstream.art/"
-                        }
-                    }];
-                }
+            ],
+            headers: {
+                "Referer": "https://hubstream.art/"
             }
-        }
-
-        // Method 2: Look for src= attribute with m3u8
-        var srcIdx = html.indexOf('src="');
-        while (srcIdx !== -1) {
-            var srcStart = srcIdx + 5;
-            var srcEnd = html.indexOf('"', srcStart);
-            if (srcEnd > srcStart) {
-                var srcUrl = html.substring(srcStart, srcEnd);
-                if (srcUrl.indexOf(".m3u8") !== -1) {
-                    console.log("Found m3u8 in src:", srcUrl.substring(0, 60));
-                    return [{
-                        server: "HubStream",
-                        link: srcUrl,
-                        type: "m3u8",
-                        quality: "HD",
-                        headers: {
-                            "Referer": "https://hubstream.art/"
-                        }
-                    }];
-                }
-            }
-            srcIdx = html.indexOf('src="', srcIdx + 1);
-        }
-
-        // Fallback: Return the hubstream link itself (let player try to handle it)
-        console.log("Could not find m3u8, returning iframe link");
-        return [{
-            server: "HubStream",
-            link: link,
-            type: "iframe",
-            quality: ""
-        }];
-
-    } catch (err) {
-        console.error("extractFromHubstream error:", err);
-        return [];
-    }
+        })
+    }];
 }
 
 function followNextUrl(url) {
