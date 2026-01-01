@@ -110,7 +110,10 @@ function decodeGadgetsweb(encoded) {
 /**
  * Extract from HubStream - requires WebView automation
  * HubStream page is JavaScript-rendered, m3u8 not available via HTTP
- * Uses WebView to wait for page load and extract video source
+ * Uses WebView to:
+ * 1. Wait for page to load
+ * 2. Click play button (required to load m3u8)
+ * 3. Extract video source
  */
 function extractFromHubstream(link) {
     console.log("HubStream requires WebView automation:", link);
@@ -123,13 +126,32 @@ function extractFromHubstream(link) {
         quality: "HD",
         automation: JSON.stringify({
             steps: [
-                // Step 1: Wait for video element to appear
+                // Step 1: Wait for video/player element to appear
                 {
                     action: "wait",
-                    selector: "video, source, media-player",
+                    selector: "video, .play-button, .vjs-big-play-button, [class*='play'], button",
                     timeout: 10000
                 },
-                // Step 2: Extract m3u8 URL from video source
+                // Step 2: Click the play button to load the actual video
+                {
+                    action: "click",
+                    selectors: [
+                        ".play-button",
+                        ".vjs-big-play-button",
+                        "[class*='play-btn']",
+                        "[class*='play-button']",
+                        "button[class*='play']",
+                        ".plyr__control--overlaid",
+                        "video"
+                    ]
+                },
+                // Step 3: Wait for video source to load after clicking
+                {
+                    action: "wait",
+                    selector: "source[src*='.m3u8'], video[src*='.m3u8']",
+                    timeout: 15000
+                },
+                // Step 4: Extract m3u8 URL from video source
                 {
                     action: "extractVideoUrl",
                     selectors: [
