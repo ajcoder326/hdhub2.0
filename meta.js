@@ -1,4 +1,4 @@
-// HDHub4u 2.0 Meta Module - Movie vs Series Differentiation
+// HDHub4u 2.0 Meta Module - Handles Multiple Page Structures
 
 var headers = {
     "Cookie": "xla=s4t",
@@ -33,7 +33,7 @@ function getMetaData(link, providerContext) {
         }
         console.log("Title:", title.substring(0, 40));
 
-        // Determine type - check for "Season" in title
+        // Determine type
         var type = "movie";
         var isSeries = false;
         if (title) {
@@ -77,15 +77,13 @@ function getMetaData(link, providerContext) {
         }
 
         // ============================================
-        // EXTRACT LINKS - DIFFERENT FOR MOVIES VS SERIES
+        // EXTRACT LINKS
         // ============================================
         var linkList = [];
 
         if (isSeries) {
-            // FOR SERIES: Only show episode links, exclude full pack downloads
             linkList = extractSeriesLinks($, container);
         } else {
-            // FOR MOVIES: Show quality links
             linkList = extractMovieLinks($, container);
         }
 
@@ -108,7 +106,7 @@ function getMetaData(link, providerContext) {
 }
 
 /**
- * Extract links for MOVIES - quality-based (480p, 720p, 1080p)
+ * Extract links for MOVIES
  */
 function extractMovieLinks($, container) {
     var linkList = [];
@@ -129,9 +127,6 @@ function extractMovieLinks($, container) {
         if (!isProvider) continue;
 
         seenUrls[href] = true;
-
-        // For movies, quality links with [XGB] are the main downloads
-        // Include them as quality options
         qualityLinks.push({ title: text || "Download", link: href });
     }
 
@@ -146,34 +141,128 @@ function extractMovieLinks($, container) {
 }
 
 /**
- * Extract links for SERIES - episode-based (exclude full season packs)
+ * Extract links for SERIES - handles two patterns:
+ * Pattern A: Episode text is a link itself (<a>EPiSODE 1</a> | <a>WATCH</a>)
+ * Pattern B: Episode as header, links follow (<h4>EPiSODE 1</h4> then links)
  */
 function extractSeriesLinks($, container) {
     var linkList = [];
-    var currentEpisode = "";
-    var episodeMap = {}; // { "Episode 1": [{title, link}, ...], ... }
+    var episodeMap = {};
 
-    // Find all h4 elements and track episode context
+    // Try Pattern A first (episode text as link)
+    var patternAResult = extractPatternA($, container);
+
+    // Try Pattern B (episode as header)
+    var patternBResult = extractPatternB($, container);
+
+    // Merge results, preferring whichever found more
+    if (patternAResult.length >= patternBResult.length) {
+        console.log("Using Pattern A (link-based episodes):", patternAResult.length);
+        linkList = patternAResult;
+    } else {
+        console.log("Using Pattern B (header-based episodes):", patternBResult.length);
+        linkList = patternBResult;
+    }
+
+    return linkList;
+}
+
+/**
+ * Pattern A: Episode text is inside anchor tag
+ * Example: <h3><a>EPiSODE 1</a> | <a>WATCH</a></h3>
+ */
+function extractPatternA($, container) {
+    var linkList = [];
+    var episodeMap = {};
+    var seenUrls = {};
+
+    // Find all anchor tags with "EPISODE" in text
+    var allLinks = container.find("a");
+
+    for (var i = 0; i < allLinks.length; i++) {
+        var anchor = allLinks.eq(i);
+        var text = anchor.text().trim();
+        var textUpper = text.toUpperCase();
+        var href = anchor.attr("href") || "";
+
+        if (href.indexOf("http") !== 0) continue;
+
+        // Skip pack links with file sizes
+        if (hasFileSize(text)) continue;
+
+        // Check if this is an episode link
+        if (textUpper.indexOf("EPISODE") !== -1 || textUpper.indexOf("EPISOD") !== -1) {
+            // Extract episode number
+            var epNum = extractEpisodeNumber(text);
+            if (!epNum) continue;
+
+            var epKey = "Episode " + epNum;
+            if (!episodeMap[epKey]) {
+                episodeMap[epKey] = [];
+            }
+
+            // Check for provider link
+            var isProvider = href.indexOf("gadgetsweb") !== -1 ||
+                href.indexOf("hubstream") !== -1 ||
+                href.indexOf("hubdrive") !== -1 ||
+                href.indexOf("hubcloud") !== -1;
+
+            if (isProvider && !seenUrls[href]) {
+                seenUrls[href] = true;
+                episodeMap[epKey].push({
+                    title: "Download",
+                    link: href
+                });
+            }
+
+            // Also look for sibling WATCH link in same container
+            var parent = anchor.parent();
+            var siblingLinks = parent.find("a");
+            for (var s = 0; s < siblingLinks.length; s++) {
+                var sibling = siblingLinks.eq(s);
+                var sibText = sibling.text().trim().toUpperCase();
+                var sibHref = sibling.attr("href") || "";
+
+                if (sibHref.indexOf("http") !== 0 || seenUrls[sibHref]) continue;
+
+                if (sibText === "WATCH" || sibText.indexOf("WATCH") !== -1) {
+                    var sibIsProvider = sibHref.indexOf("hubstream") !== -1 ||
+                        sibHref.indexOf("gadgetsweb") !== -1 ||
+                        sibHref.indexOf("hubdrive") !== -1;
+                    if (sibIsProvider) {
+                        seenUrls[sibHref] = true;
+                        episodeMap[epKey].push({
+                            title: "WATCH",
+                            link: sibHref
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    return convertEpisodeMapToList(episodeMap);
+}
+
+/**
+ * Pattern B: Episode is a header, links follow in subsequent elements
+ * Example: <h4>EPiSODE 1</h4> then <h4>720p - <a>Drive</a> | <a>Instant</a></h4>
+ */
+function extractPatternB($, container) {
+    var linkList = [];
+    var currentEpisode = "";
+    var episodeMap = {};
+
     var h4Elements = container.find("h4");
-    console.log("Found h4 elements:", h4Elements.length);
 
     for (var h = 0; h < h4Elements.length; h++) {
         var h4 = h4Elements.eq(h);
         var h4Text = h4.text().trim();
         var h4TextUpper = h4Text.toUpperCase();
 
-        // Check if this h4 is an episode header
+        // Check if this is an episode header
         if (h4TextUpper.indexOf("EPISODE") !== -1 || h4TextUpper.indexOf("EPISOD") !== -1) {
-            // Extract episode number
-            var epNum = "";
-            for (var c = 0; c < h4Text.length; c++) {
-                var ch = h4Text.charAt(c);
-                if (ch >= "0" && ch <= "9") {
-                    epNum += ch;
-                } else if (epNum.length > 0) {
-                    break;
-                }
-            }
+            var epNum = extractEpisodeNumber(h4Text);
             if (epNum) {
                 currentEpisode = "Episode " + epNum;
                 if (!episodeMap[currentEpisode]) {
@@ -181,7 +270,7 @@ function extractSeriesLinks($, container) {
                 }
             }
         }
-        // If we have a current episode, look for links in this h4
+        // If we have a current episode, look for links
         else if (currentEpisode) {
             var h4Links = h4.find("a");
             for (var l = 0; l < h4Links.length; l++) {
@@ -190,12 +279,7 @@ function extractSeriesLinks($, container) {
                 var epText = epLink.text().trim();
 
                 if (epHref.indexOf("http") !== 0) continue;
-
-                // Skip full season pack links (they have sizes like [2.6GB])
-                if (hasFileSize(epText)) {
-                    console.log("Skipping pack link:", epText.substring(0, 30));
-                    continue;
-                }
+                if (hasFileSize(epText)) continue;
 
                 var isProvider = epHref.indexOf("gadgetsweb") !== -1 ||
                     epHref.indexOf("hubstream") !== -1 ||
@@ -204,7 +288,6 @@ function extractSeriesLinks($, container) {
                     epHref.indexOf("hubcdn") !== -1;
 
                 if (isProvider && epText) {
-                    // Get quality from h4 text (720p, 1080p)
                     var quality = "";
                     if (h4TextUpper.indexOf("720") !== -1) quality = "720p";
                     else if (h4TextUpper.indexOf("1080") !== -1) quality = "1080p";
@@ -222,8 +305,16 @@ function extractSeriesLinks($, container) {
         }
     }
 
-    // Convert episodeMap to linkList, sorted by episode number
+    return convertEpisodeMapToList(episodeMap);
+}
+
+/**
+ * Convert episode map to sorted linkList
+ */
+function convertEpisodeMapToList(episodeMap) {
+    var linkList = [];
     var episodeKeys = [];
+
     for (var key in episodeMap) {
         if (episodeMap.hasOwnProperty(key)) {
             episodeKeys.push(key);
@@ -246,22 +337,36 @@ function extractSeriesLinks($, container) {
         }
     }
 
-    console.log("Series: Found", episodeKeys.length, "episodes");
     return linkList;
 }
 
 /**
- * Check if text contains file size indicator like [2.6GB] or [500MB]
+ * Extract episode number from text
+ */
+function extractEpisodeNumber(text) {
+    var epNum = "";
+    var foundEp = false;
+
+    for (var c = 0; c < text.length; c++) {
+        var ch = text.charAt(c);
+        if (ch >= "0" && ch <= "9") {
+            epNum += ch;
+            foundEp = true;
+        } else if (foundEp && epNum.length > 0) {
+            break;
+        }
+    }
+
+    return epNum || null;
+}
+
+/**
+ * Check if text contains file size like [2.6GB]
  */
 function hasFileSize(text) {
-    // Look for patterns like [2.6GB], [500MB], [1.1GB], etc.
     if (text.indexOf("[") === -1) return false;
-
     var textUpper = text.toUpperCase();
-    if (textUpper.indexOf("GB]") !== -1) return true;
-    if (textUpper.indexOf("MB]") !== -1) return true;
-
-    return false;
+    return textUpper.indexOf("GB]") !== -1 || textUpper.indexOf("MB]") !== -1;
 }
 
 function createEmptyMeta() {
