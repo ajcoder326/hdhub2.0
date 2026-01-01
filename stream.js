@@ -4,7 +4,7 @@
 var headers = {
     "Cookie": "xla=s4t",
     "Referer": "https://google.com",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 };
 
 function getStreams(link, type) {
@@ -328,6 +328,12 @@ function extractLinksFromPage(html) {
         var classes = el.attr("class") || "";
         if (classes.indexOf("btn-success") !== -1 || classes.indexOf("btn-primary") !== -1) {
             isValid = true;
+        }
+
+        // Check for specific Android/App buttons
+        if (text.toLowerCase().indexOf("app") !== -1 || el.attr("id") === "android_launch") {
+            isValid = true;
+            server = "In-App Download";
         }
 
         // Extract [ServerName] from text
