@@ -85,7 +85,8 @@ function extractFromGadgetsweb(link) {
         return [{
             server: "Link",
             link: link,
-            type: "direct"
+            type: "direct",
+            headers: headers
         }];
 
     } catch (err) {
@@ -200,7 +201,8 @@ function followNextUrl(url) {
         return [{
             server: "Link",
             link: url,
-            type: "direct"
+            type: "direct",
+            headers: headers
         }];
     }
 }
@@ -224,7 +226,8 @@ function extractFromHblinks(link) {
         return [{
             server: "HBLinks",
             link: link,
-            type: "direct"
+            type: "direct",
+            headers: headers
         }];
 
     } catch (err) {
@@ -352,6 +355,7 @@ function extractLinksFromPage(html) {
                 server: server || "Download",
                 link: href,
                 type: "direct",
+                headers: headers,
                 quality: ""
             });
         }
