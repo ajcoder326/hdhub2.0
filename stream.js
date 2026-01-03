@@ -11,7 +11,10 @@ function getStreams(link, type) {
     console.log("HDHub4u 2.0 getStreams:", link);
 
     try {
-        if (link.indexOf("hubstream") !== -1) {
+        if (link.indexOf("pixeldrain") !== -1) {
+            return extractFromPixeldrain(link);
+        }
+        else if (link.indexOf("hubstream") !== -1) {
             return extractFromHubstream(link);
         }
         else if (link.indexOf("hubdrive") !== -1) {
@@ -29,6 +32,71 @@ function getStreams(link, type) {
     } catch (err) {
         console.error("getStreams error:", err);
         return [];
+    }
+}
+
+/**
+ * Extract direct download link from Pixeldrain
+ * Converts: pixeldrain.com/u/FILE_ID -> pixeldrain.com/api/file/FILE_ID
+ * Also handles: pixeldrain.dev, pixeldra.in, etc.
+ */
+function extractFromPixeldrain(link) {
+    console.log("Extracting from Pixeldrain:", link);
+
+    try {
+        // Extract file ID from URL like /u/kKYvQriu
+        var fileId = "";
+        var uIdx = link.indexOf("/u/");
+        if (uIdx !== -1) {
+            fileId = link.substring(uIdx + 3);
+            // Remove any trailing slashes or query params
+            var slashIdx = fileId.indexOf("/");
+            if (slashIdx !== -1) fileId = fileId.substring(0, slashIdx);
+            var queryIdx = fileId.indexOf("?");
+            if (queryIdx !== -1) fileId = fileId.substring(0, queryIdx);
+        }
+
+        if (!fileId) {
+            console.error("Could not extract file ID from:", link);
+            return [{
+                server: "Pixeldrain",
+                link: link,
+                type: "direct",
+                headers: headers
+            }];
+        }
+
+        // Get base domain (pixeldrain.com, pixeldrain.dev, etc.)
+        var domain = "";
+        var protoIdx = link.indexOf("://");
+        if (protoIdx !== -1) {
+            var pathIdx = link.indexOf("/", protoIdx + 3);
+            domain = link.substring(0, pathIdx);
+        }
+
+        // Convert to direct API download URL
+        var directUrl = domain + "/api/file/" + fileId;
+        console.log("Pixeldrain direct URL:", directUrl);
+
+        return [{
+            server: "Pixeldrain",
+            link: directUrl,
+            type: "direct",
+            quality: "HD",
+            headers: {
+                "Referer": link,
+                "User-Agent": headers["User-Agent"]
+            }
+        }];
+
+    } catch (err) {
+        console.error("extractFromPixeldrain error:", err);
+        return [{
+            server: "Pixeldrain",
+            link: link,
+            type: "direct",
+            headers: headers
+        }];
     }
 }
 
