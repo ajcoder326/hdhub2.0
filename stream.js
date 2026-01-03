@@ -311,9 +311,23 @@ function extractLinksFromPage(html) {
     var streams = [];
     var seen = {};
 
-    var serverPatterns = ["pixel", "fsl", "hubcdn", "gdflix", "cloudrip"];
-    var allLinks = $("a");
+    // Extended server patterns - match partial domains
+    var serverPatterns = [
+        { pattern: "pixeldrain", name: "Pixeldrain" },
+        { pattern: "pixel", name: "Pixeldrain" },
+        { pattern: "fsl.", name: "FSL" },
+        { pattern: "fastserver", name: "FastServer" },
+        { pattern: "hubcdn", name: "HubCDN" },
+        { pattern: "gdflix", name: "GDFlix" },
+        { pattern: "cloudrip", name: "CloudRip" },
+        { pattern: "gofile", name: "GoFile" },
+        { pattern: "doodstream", name: "DoodStream" },
+        { pattern: "streamtape", name: "StreamTape" },
+        { pattern: "filelions", name: "FileLions" },
+        { pattern: "streamwish", name: "StreamWish" }
+    ];
 
+    var allLinks = $("a");
     console.log("Total links on page:", allLinks.length);
 
     for (var idx = 0; idx < allLinks.length; idx++) {
@@ -326,27 +340,42 @@ function extractLinksFromPage(html) {
 
         var isValid = false;
         var server = "";
+        var hrefLower = href.toLowerCase();
 
+        // Check against server patterns
         for (var i = 0; i < serverPatterns.length; i++) {
-            if (href.toLowerCase().indexOf(serverPatterns[i]) !== -1) {
+            if (hrefLower.indexOf(serverPatterns[i].pattern) !== -1) {
                 isValid = true;
-                server = serverPatterns[i].toUpperCase();
+                server = serverPatterns[i].name;
                 break;
             }
         }
 
         var classes = el.attr("class") || "";
-        if (classes.indexOf("btn-success") !== -1 || classes.indexOf("btn-primary") !== -1) {
+        // Check for download buttons with various styles
+        if (classes.indexOf("btn-success") !== -1 ||
+            classes.indexOf("btn-primary") !== -1 ||
+            classes.indexOf("btn-danger") !== -1 ||
+            classes.indexOf("btn-info") !== -1 ||
+            classes.indexOf("download") !== -1) {
             isValid = true;
+            if (!server) server = "Download";
         }
 
         // Check for specific Android/App buttons
-        if (text.toLowerCase().indexOf("app") !== -1 || el.attr("id") === "android_launch") {
+        var textLower = text.toLowerCase();
+        if (textLower.indexOf("app") !== -1 || el.attr("id") === "android_launch") {
             isValid = true;
             server = "In-App Download";
         }
 
-        // Extract [ServerName] from text
+        // Check for direct download keywords
+        if (textLower.indexOf("download") !== -1 || textLower.indexOf("direct") !== -1) {
+            isValid = true;
+            if (!server) server = "Download";
+        }
+
+        // Extract [ServerName] from text like [Pixeldrain]
         var bracketIdx = text.indexOf("[");
         if (bracketIdx !== -1) {
             var endIdx = text.indexOf("]", bracketIdx);
@@ -358,6 +387,7 @@ function extractLinksFromPage(html) {
 
         if (isValid) {
             seen[href] = true;
+            console.log("Found stream:", server, "->", href.substring(0, 60));
             streams.push({
                 server: server || "Download",
                 link: href,
