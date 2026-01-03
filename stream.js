@@ -455,10 +455,29 @@ function extractLinksFromPage(html) {
 
         if (isValid) {
             seen[href] = true;
-            console.log("Found stream:", server, "->", href.substring(0, 60));
+
+            // Convert Pixeldrain page URLs to direct API URLs
+            var finalUrl = href;
+            if (href.indexOf("pixeldrain") !== -1 && href.indexOf("/u/") !== -1) {
+                var uIdx = href.indexOf("/u/");
+                var fileId = href.substring(uIdx + 3);
+                // Clean file ID
+                var slashIdx = fileId.indexOf("/");
+                if (slashIdx !== -1) fileId = fileId.substring(0, slashIdx);
+                var queryIdx = fileId.indexOf("?");
+                if (queryIdx !== -1) fileId = fileId.substring(0, queryIdx);
+                // Get domain
+                var protoIdx = href.indexOf("://");
+                var pathIdx = href.indexOf("/", protoIdx + 3);
+                var domain = href.substring(0, pathIdx);
+                finalUrl = domain + "/api/file/" + fileId + "?download";
+                console.log("Converted Pixeldrain:", href, "->", finalUrl);
+            }
+
+            console.log("Found stream:", server, "->", finalUrl.substring(0, 60));
             streams.push({
                 server: server || "Download",
-                link: href,
+                link: finalUrl,
                 type: "direct",
                 headers: headers,
                 quality: ""
