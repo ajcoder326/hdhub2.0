@@ -16,7 +16,18 @@ function getMetaData(link, providerContext) {
         }
 
         var $ = cheerio.load(response.data);
+        // Try multiple container selectors for different page structures
         var container = $("main.page-body");
+        if (container.length === 0) {
+            container = $(".entry-content");
+        }
+        if (container.length === 0) {
+            container = $("article");
+        }
+        if (container.length === 0) {
+            container = $("body");
+        }
+        console.log("Using container:", container.length > 0 ? "found" : "body fallback");
 
         // Extract title
         var title = "";
@@ -107,12 +118,19 @@ function getMetaData(link, providerContext) {
 
 /**
  * Extract links for MOVIES
+ * Searches entire document for download links with quality info
  */
 function extractMovieLinks($, container) {
     var linkList = [];
+    // Search in container first, then fallback to entire body
     var allLinks = container.find("a");
+    if (allLinks.length < 2) {
+        allLinks = $("body a");
+    }
     var seenUrls = {};
     var qualityLinks = [];
+
+    console.log("Searching", allLinks.length, "links for download options");
 
     for (var i = 0; i < allLinks.length; i++) {
         var anchor = allLinks.eq(i);
@@ -123,11 +141,37 @@ function extractMovieLinks($, container) {
 
         var isProvider = href.indexOf("gadgetsweb") !== -1 ||
             href.indexOf("hubdrive") !== -1 ||
-            href.indexOf("hubcloud") !== -1;
+            href.indexOf("hubcloud") !== -1 ||
+            href.indexOf("hblinks") !== -1;
         if (!isProvider) continue;
 
         seenUrls[href] = true;
-        qualityLinks.push({ title: text || "Download", link: href });
+
+        // Extract quality from text like "480p⚡[350MB]" or "720p x264 [850MB]"
+        var quality = "";
+        var textUpper = text.toUpperCase();
+        if (textUpper.indexOf("1080P") !== -1) quality = "1080p";
+        else if (textUpper.indexOf("720P") !== -1) quality = "720p";
+        else if (textUpper.indexOf("480P") !== -1) quality = "480p";
+        else if (textUpper.indexOf("2160P") !== -1 || textUpper.indexOf("4K") !== -1) quality = "4K";
+
+        // Extract size like [350MB] or [1.6GB]
+        var size = "";
+        var sizeMatch = text.match(/\[([\d.]+\s*(MB|GB))\]/i);
+        if (sizeMatch) {
+            size = sizeMatch[1];
+        }
+
+        // Create title with quality and size
+        var title = text || "Download";
+        if (quality && size) {
+            title = quality + " [" + size + "]";
+        } else if (quality) {
+            title = quality;
+        }
+
+        qualityLinks.push({ title: title, link: href });
+        console.log("Found download:", title, "->", href.substring(0, 60));
     }
 
     if (qualityLinks.length > 0) {
