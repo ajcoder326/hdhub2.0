@@ -75,7 +75,7 @@ function extractFromPixeldrain(link) {
         }
 
         // Convert to direct API download URL
-        var directUrl = domain + "/api/file/" + fileId;
+        var directUrl = domain + "/api/file/" + fileId + "?download";
         console.log("Pixeldrain direct URL:", directUrl);
 
         return [{
