@@ -214,10 +214,17 @@ function extractFromHblinks(link) {
         var response = axios.get(link, { headers: headers });
         var $ = cheerio.load(response.data);
 
-        var hubLink = $('a[href*="hubdrive"]').first().attr("href");
+        // Prioritize HubCloud first (more reliable), then HubDrive as fallback
+        var hubLink = $('a[href*="hubcloud"]').first().attr("href");
         if (!hubLink) {
-            hubLink = $('a[href*="hubcloud"]').first().attr("href");
+            hubLink = $('a[href*="hubdrive"]').first().attr("href");
         }
+        // Also check for direct download buttons
+        if (!hubLink) {
+            hubLink = $('a.btn-success, a.btn-primary').first().attr("href");
+        }
+
+        console.log("Found hub link:", hubLink);
 
         if (hubLink) {
             return followNextUrl(hubLink);
